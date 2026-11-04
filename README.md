@@ -8,26 +8,17 @@ The host speaks text chat only. The module turns Mago tool calls into `<mago_too
 
 ## Host setup
 
-From the Magento root:
+The host is a Node script. It runs where `node` and `claude` are, never in the `php` container, and `bin/magento` has no command for it. From the Magento root, in a Mac terminal:
 
 ```bash
 claude auth login
-php bin/magento claude:proxy:start
-php bin/magento claude:proxy:stop
-```
-
-`--bind` and `--port` on start change the listen address and port. The default is `127.0.0.1` and `3456`.
-
-In this shop `php bin/magento` runs inside the php container. That container cannot see the Mac login, so start and stop refuse there and print the host script. Run the printed line in a Mac terminal:
-
-```bash
 app/code/MagoAssistant/ClaudeSubscription/bin/claude-subscription start
 app/code/MagoAssistant/ClaudeSubscription/bin/claude-subscription stop
 ```
 
-`start` leaves the listener running after the terminal closes. The pid is `var/claude-subscription.pid` and the log is `var/log/claude-subscription.log`. `stop` ends that process. `claude` must be on `PATH` in the terminal that starts it (`~/.local/bin` is the usual place). The script does not run inside the `php` container, and Docker Compose does not start it. A reboot stops it. Log in again only when that Mac session is gone.
+`start` leaves the listener running after the terminal closes. The pid is `var/claude-subscription.pid` and the log is `var/log/claude-subscription.log`. `stop` ends that process. Without `start` or `stop` the script runs the listener in the foreground. `claude` must be on `PATH` in the terminal that starts it (`~/.local/bin` is the usual place). Docker Compose does not start it. A reboot stops it. Log in again only when that Mac session is gone.
 
-`HOST` and `PORT` change the bind address and port. The default is `127.0.0.1` and `3456`. `CLAUDE_BIN` overrides the `claude` executable. A request is stopped after 10 minutes.
+`--host` and `--port`, or the `HOST` and `PORT` variables, change the bind address and port. The default is `127.0.0.1` and `3456`. `CLAUDE_BIN` overrides the `claude` executable. A request is stopped after 10 minutes.
 
 Check it from the Mac with `curl http://127.0.0.1:3456/v1/models`. `host.docker.internal` does not resolve in a Mac terminal.
 

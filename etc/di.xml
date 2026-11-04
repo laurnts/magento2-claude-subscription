@@ -36,22 +36,4 @@
                 type="MagoAssistant\ClaudeSubscription\Plugin\ClientFactoryPlugin"
                 sortOrder="10"/>
     </type>
-    <type name="MagoAssistant\ClaudeSubscription\Console\Command\StartCommand">
-        <arguments>
-            <argument name="filesystem" xsi:type="object">Magento\Framework\Filesystem\Driver\File</argument>
-        </arguments>
-    </type>
-    <type name="MagoAssistant\ClaudeSubscription\Console\Command\StopCommand">
-        <arguments>
-            <argument name="filesystem" xsi:type="object">Magento\Framework\Filesystem\Driver\File</argument>
-        </arguments>
-    </type>
-    <type name="Magento\Framework\Console\CommandListInterface">
-        <arguments>
-            <argument name="commands" xsi:type="array">
-                <item name="claude_proxy_start" xsi:type="object">MagoAssistant\ClaudeSubscription\Console\Command\StartCommand</item>
-                <item name="claude_proxy_stop" xsi:type="object">MagoAssistant\ClaudeSubscription\Console\Command\StopCommand</item>
-            </argument>
-        </arguments>
-    </type>
 </config>
