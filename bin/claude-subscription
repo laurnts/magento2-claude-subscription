@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# Start or stop the Claude subscription host.
+# Run it on the machine where `claude auth login` was done. The php container
+# cannot see that login.
+set -euo pipefail
+
+dir=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+root=$dir
+while [[ "$root" != "/" && ! -f "$root/bin/magento" ]]; do
+    root=$(dirname "$root")
+done
+if [[ ! -f "$root/bin/magento" ]]; then
+    echo "Could not find the Magento root from $dir." >&2
+    exit 1
+fi
+
+pidfile="$root/var/claude-subscription.pid"
+logfile="$root/var/log/claude-subscription.log"
+action=foreground
+host=127.0.0.1
+port=3456
+
+usage() {
+    echo "Usage: claude-subscription [start|stop] [--host 127.0.0.1] [--port 3456]" >&2
+    exit 1
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        start|stop)
+            action=$1
+            shift
+            ;;
+        --host)
+            host=${2:?--host needs an address}
+            shift 2
+            ;;
+        --port)
+            port=${2:?--port needs a port}
+            shift 2
+            ;;
+        *)
+            usage
+            ;;
+    esac
+done
+
+if [[ ! "$port" =~ ^[0-9]+$ ]] || [[ "$port" -lt 1 ]] || [[ "$port" -gt 65535 ]]; then
+    echo "Port must be a number from 1 to 65535." >&2
+    exit 1
+fi
+
+# Pid of the live host, or nothing when the pid file is missing or stale.
+running_pid() {
+    if [[ ! -f "$pidfile" ]]; then
+        return 1
+    fi
+    local pid
+    pid=$(<"$pidfile")
+    if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+        echo "$pid"
+        return 0
+    fi
+    return 1
+}
+
+case "$action" in
+    stop)
+        if pid=$(running_pid); then
+            kill "$pid" 2>/dev/null || true
+            for _ in 1 2 3 4 5; do
+                if ! kill -0 "$pid" 2>/dev/null; then
+                    break
+                fi
+                sleep 1
+            done
+            if kill -0 "$pid" 2>/dev/null; then
+                kill -9 "$pid" 2>/dev/null || true
+            fi
+            rm -f "$pidfile"
+            echo "Stopped $pid."
+        else
+            rm -f "$pidfile"
+            echo "Not running."
+        fi
+        ;;
+    start)
+        if pid=$(running_pid); then
+            echo "Already running ($pid)."
+            exit 0
+        fi
+        mkdir -p "$root/var/log"
+        export HOST="$host"
+        export PORT="$port"
+        nohup node "$dir/claude-subscription-host.mjs" >>"$logfile" 2>&1 &
+        echo "$!" >"$pidfile"
+        echo "Started $!."
+        echo "Log: $logfile"
+        ;;
+    foreground)
+        export HOST="$host"
+        export PORT="$port"
+        exec node "$dir/claude-subscription-host.mjs"
+        ;;
+esac

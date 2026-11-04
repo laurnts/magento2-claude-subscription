@@ -1,0 +1,57 @@
+<?xml version="1.0"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:framework:ObjectManager/etc/config.xsd">
+    <type name="MageOS\AiBase\Model\ServiceRegistry">
+        <arguments>
+            <argument name="services" xsi:type="array">
+                <item name="claude_subscription" xsi:type="object">MagoAssistant\ClaudeSubscription\AiService\ClaudeSubscription</item>
+            </argument>
+        </arguments>
+    </type>
+    <type name="MagoAssistant\ClaudeSubscription\Service\Proxy\HttpProxyClient">
+        <arguments>
+            <argument name="http" xsi:type="object">MagoAssistant\ClaudeSubscription\Model\Http\SymfonyClient</argument>
+        </arguments>
+    </type>
+    <type name="MagoAssistant\ClaudeSubscription\AiService\ClaudeSubscription">
+        <arguments>
+            <argument name="http" xsi:type="object">MagoAssistant\ClaudeSubscription\Model\Http\SymfonyClient</argument>
+        </arguments>
+    </type>
+    <preference for="MagoAssistant\ClaudeSubscription\Service\Proxy\ProxyClientInterface"
+                type="MagoAssistant\ClaudeSubscription\Service\Proxy\HttpProxyClient"/>
+    <preference for="MagoAssistant\ClaudeSubscription\Service\Client\UsageWrapInterface"
+                type="MagoAssistant\ClaudeSubscription\Service\Client\UsageDecorator"/>
+    <type name="MageOS\AiBase\Model\Client\BridgeRegistry">
+        <arguments>
+            <argument name="bridges" xsi:type="array">
+                <item name="claude_subscription" xsi:type="array">
+                    <item name="factory" xsi:type="string">MagoAssistant\ClaudeSubscription\Model\Client\PlatformFactory</item>
+                </item>
+            </argument>
+        </arguments>
+    </type>
+    <type name="MageOS\AiBase\Model\Client\ClientFactory">
+        <plugin name="magoassistant_claude_subscription_client"
+                type="MagoAssistant\ClaudeSubscription\Plugin\ClientFactoryPlugin"
+                sortOrder="10"/>
+    </type>
+    <type name="MagoAssistant\ClaudeSubscription\Console\Command\StartCommand">
+        <arguments>
+            <argument name="filesystem" xsi:type="object">Magento\Framework\Filesystem\Driver\File</argument>
+        </arguments>
+    </type>
+    <type name="MagoAssistant\ClaudeSubscription\Console\Command\StopCommand">
+        <arguments>
+            <argument name="filesystem" xsi:type="object">Magento\Framework\Filesystem\Driver\File</argument>
+        </arguments>
+    </type>
+    <type name="Magento\Framework\Console\CommandListInterface">
+        <arguments>
+            <argument name="commands" xsi:type="array">
+                <item name="claude_proxy_start" xsi:type="object">MagoAssistant\ClaudeSubscription\Console\Command\StartCommand</item>
+                <item name="claude_proxy_stop" xsi:type="object">MagoAssistant\ClaudeSubscription\Console\Command\StopCommand</item>
+            </argument>
+        </arguments>
+    </type>
+</config>
