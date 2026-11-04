@@ -6,19 +6,20 @@ declare(strict_types=1);
 
 namespace MagoAssistant\ClaudeSubscription\AiService;
 
-use MageOS\AiBase\Api\Data\AiServiceConfigurationInterface;
+use MageOS\AiBase\AiServices\AbstractAiService;
+use MageOS\AiBase\AiServices\ModelListTrait;
 use MageOS\AiBase\Api\Data\FieldDescriptorInterface;
+use MageOS\AiBase\Api\Data\FieldDescriptorInterfaceFactory;
+use MageOS\AiBase\Api\JsonFetcherInterface;
 use MageOS\AiBase\Api\ModelListProviderInterface;
-use MageOS\AiBase\Model\FieldDescriptor;
-use Magento\Framework\Exception\LocalizedException;
-use Symfony\Component\HttpClient\Exception\TransportException;
-use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 /**
- * Admin configuration for a Claude Subscription proxy reached over HTTP.
+ * Admin configuration for the Claude Subscription host reached over HTTP.
  */
-class ClaudeSubscription implements AiServiceConfigurationInterface, ModelListProviderInterface
+class ClaudeSubscription extends AbstractAiService implements ModelListProviderInterface
 {
+    use ModelListTrait;
+
     public const CODE = 'claude_subscription';
 
     public const DEFAULT_BASE_URL = 'http://host.docker.internal:3456/v1';
@@ -26,17 +27,28 @@ class ClaudeSubscription implements AiServiceConfigurationInterface, ModelListPr
     public const DEFAULT_MODEL = 'sonnet';
 
     /**
-     * @param HttpClientInterface $http
+     * Aliases `claude --model` accepts. The saved value is passed through as-is.
+     */
+    private const MODELS = [
+        'opus' => 'Opus',
+        'fable' => 'Fable',
+        'sonnet' => 'Sonnet',
+        'haiku' => 'Haiku',
+    ];
+
+    /**
+     * @param FieldDescriptorInterfaceFactory $fieldFactory
+     * @param JsonFetcherInterface $modelListFetcher
      */
     public function __construct(
-        private readonly HttpClientInterface $http,
+        FieldDescriptorInterfaceFactory $fieldFactory,
+        private readonly JsonFetcherInterface $modelListFetcher,
     ) {
+        parent::__construct($fieldFactory);
     }
 
     /**
-     * Machine code stored on the AI service row.
-     *
-     * @return string
+     * @inheritdoc
      */
     public function getCode(): string
     {
@@ -44,9 +56,7 @@ class ClaudeSubscription implements AiServiceConfigurationInterface, ModelListPr
     }
 
     /**
-     * Name shown in the AI Configuration provider list.
-     *
-     * @return string
+     * @inheritdoc
      */
     public function getName(): string
     {
@@ -54,107 +64,78 @@ class ClaudeSubscription implements AiServiceConfigurationInterface, ModelListPr
     }
 
     /**
-     * Fields rendered for a Claude Subscription row.
+     * @inheritdoc
+     */
+    public function getSupportedModels(): array
+    {
+        return self::MODELS;
+    }
+
+    /**
+     * A base URL and a model. There is no API key: the host owns the Claude login.
      *
      * @return FieldDescriptorInterface[]
      */
     public function getConfigurationFields(): array
     {
         return [
-            new FieldDescriptor('base_url', 'Base URL', 'text', [], self::DEFAULT_BASE_URL),
-            new FieldDescriptor('model', 'Model', 'select', $this->selectOptions(), self::DEFAULT_MODEL),
+            $this->baseUrlField(self::DEFAULT_BASE_URL),
+            $this->modelFieldWithDefault(),
         ];
     }
 
     /**
-     * Models the reference proxy advertises, used before Refresh Models has been clicked.
-     *
-     * @return array<string, string>
+     * @inheritdoc
      */
-    public function getSupportedModels(): array
+    public function fetchModels(#[\SensitiveParameter] array $configuration): array
     {
-        $models = [];
-        foreach ($this->selectOptions() as $option) {
-            $models[$option['value']] = $option['label'];
-        }
-        return $models;
+        $baseUrl = $this->resolveBaseUrl($configuration, self::DEFAULT_BASE_URL);
+
+        return $this->parseDataModelList($this->modelListFetcher->getJson($baseUrl . '/models'));
     }
 
     /**
-     * Ask the host proxy for the model ids it currently serves.
+     * The row's base URL without surrounding space or trailing slash, or the Docker-host default.
      *
-     * @param array $configuration
-     * @return array Model id to label
-     * @throws LocalizedException
-     */
-    public function fetchModels(array $configuration): array
-    {
-        $base = $this->baseUrl($configuration);
-        $url = rtrim($base, '/') . '/models';
-        $options = ['timeout' => 20, 'headers' => ['Accept' => 'application/json']];
-        try {
-            $response = $this->http->request('GET', $url, $options);
-            $status = $response->getStatusCode();
-        } catch (TransportException $exception) {
-            throw new LocalizedException(__(
-                'Claude Subscription proxy is not reachable at %1.',
-                $url
-            ), $exception);
-        }
-        if ($status < 200 || $status >= 300) {
-            throw new LocalizedException(__('Claude Subscription proxy returned HTTP %1 for %2.', $status, $url));
-        }
-        try {
-            $payload = $response->toArray(false);
-        } catch (\Throwable $exception) {
-            throw new LocalizedException(__(
-                'Claude Subscription proxy returned a response that is not a model list from %1.',
-                $url
-            ), $exception);
-        }
-        $data = $payload['data'] ?? null;
-        if (!is_array($data)) {
-            throw new LocalizedException(__(
-                'Claude Subscription proxy returned a response that is not a model list from %1.',
-                $url
-            ));
-        }
-        $models = [];
-        foreach ($data as $row) {
-            if (is_array($row) && isset($row['id']) && is_string($row['id']) && $row['id'] !== '') {
-                $models[$row['id']] = $row['id'];
-            }
-        }
-        return $models;
-    }
-
-    /**
-     * Configured base URL, or the Docker-host default.
+     * The same normalisation fetchModels() applies, so Refresh Models and chat reach one address.
      *
-     * @param array $configuration
+     * @param array<string,mixed> $configuration
      * @return string
      */
-    private function baseUrl(array $configuration): string
+    public function baseUrl(#[\SensitiveParameter] array $configuration): string
     {
-        $base = $configuration['base_url'] ?? '';
-        if (!is_string($base) || $base === '') {
-            return self::DEFAULT_BASE_URL;
-        }
-        return $base;
+        return $this->resolveBaseUrl($configuration, self::DEFAULT_BASE_URL);
     }
 
     /**
-     * The aliases `claude --model` accepts. The saved value is passed through as-is.
+     * No bridge arguments: ClientFactoryPlugin builds the client from the row itself.
      *
-     * @return array<int, array{value: string, label: string}>
+     * @param array<string,mixed> $configuration
+     * @return list<mixed>
      */
-    private function selectOptions(): array
+    public function getPlatformArguments(#[\SensitiveParameter] array $configuration): array
     {
-        return [
-            ['value' => 'opus', 'label' => 'Opus'],
-            ['value' => 'fable', 'label' => 'Fable'],
-            ['value' => 'sonnet', 'label' => 'Sonnet'],
-            ['value' => 'haiku', 'label' => 'Haiku'],
-        ];
+        return [];
+    }
+
+    /**
+     * The model select, preselecting the alias the host script defaults to.
+     *
+     * @return FieldDescriptorInterface
+     */
+    private function modelFieldWithDefault(): FieldDescriptorInterface
+    {
+        $options = [];
+        foreach (self::MODELS as $value => $label) {
+            $options[] = ['value' => $value, 'label' => $label];
+        }
+
+        return $this->fieldFactory->create([
+            'name' => self::FIELD_MODEL,
+            'label' => 'Model',
+            'type' => FieldDescriptorInterface::TYPE_SELECT,
+            'options' => $options,
+            'default' => self::DEFAULT_MODEL,
+        ]);
     }
 }

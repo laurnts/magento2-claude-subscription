@@ -2,7 +2,7 @@
 
 ## What it is
 
-This module lets Mago use a Claude subscription. `claude` runs on the Mac, using the login from `claude auth login`. This module's host script listens on `127.0.0.1:3456`. Magento, inside the container, sends each turn to `http://host.docker.internal:3456/v1`.
+This module is a MageOS AiBase provider that uses a Claude subscription, so an AiBase consumer such as Mago can chat through it. `claude` runs on the Mac, using the login from `claude auth login`. This module's host script listens on `127.0.0.1:3456`. Magento, inside the container, sends each turn to `http://host.docker.internal:3456/v1`.
 
 The host speaks text chat only. The module turns Mago tool calls into `<mago_tool_call>` tags and turns tool results into user messages. Claude's own tools and MCP servers are off for that run.
 
@@ -50,7 +50,7 @@ The model list is **Opus**, **Fable**, **Sonnet**, and **Haiku**. The saved valu
 
 A row saved earlier with a versioned id still runs: an id containing `opus`, `fable`, or `haiku` uses that family, and any other id uses `sonnet`. Choose one of the four aliases and save when the stored value should match the menu.
 
-The Claude Subscription button is shown because this module registers a bridge marker. There is no Symfony package to install.
+The Claude Subscription row is offered because this module registers a bridge marker with AiBase. There is no Symfony AI package to install: a plugin on AiBase's client factory builds the client for this provider and leaves every other provider alone.
 
 ## What a chat does
 
@@ -72,5 +72,7 @@ From the Magento root:
 php vendor/bin/phpunit -c app/code/MagoAssistant/ClaudeSubscription/phpunit.xml.dist
 ./vendor/bin/phpcs --standard=app/code/MagoAssistant/ClaudeSubscription/phpcs.xml app/code/MagoAssistant/ClaudeSubscription
 ```
+
+The unit tests need no Magento install beyond `vendor/`: the two factories Magento would generate are stubbed under `Test/Unit/Fakes` when `generated/code` does not hold them.
 
 Pinned references: Mago `6b0893addf3538d2a60da15a33257cc1df481099`, MageOS AI Base `b3a07623faf86665a915243a731f68c6da582607`. The listener is `bin/claude-subscription`. `claude` on this Mac was 2.1.285 when it was written.

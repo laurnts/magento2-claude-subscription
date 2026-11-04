@@ -2,11 +2,12 @@
 <ruleset xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" name="PHP_CodeSniffer"
          xsi:noNamespaceSchemaLocation="phpcs.xsd">
     <description>Mago Assistant Claude Subscription configuration for CodeSniffer.</description>
-    <rule ref="Magento2">
-        <exclude name="Magento2.PHP.FinalImplementation.FoundFinal"/>
+    <rule ref="Magento2"/>
+    <rule ref="Magento2.PHP.FinalImplementation">
+        <exclude-pattern>Test/*</exclude-pattern>
     </rule>
-    <exclude-pattern>registration.php</exclude-pattern>
     <rule ref="Generic.PHP.RequireStrictTypes">
         <severity>9</severity>
     </rule>
+    <exclude-pattern>registration.php</exclude-pattern>
 </ruleset>

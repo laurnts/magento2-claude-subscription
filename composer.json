@@ -1,13 +1,12 @@
 {
     "name": "mago-assistant/magento2-claude-subscription",
-    "description": "Chat with Mago through a Claude subscription on the Docker host.",
+    "description": "MageOS AiBase provider that chats through a Claude subscription on the Docker host.",
     "type": "magento2-module",
     "license": "MIT",
     "version": "1.0.0",
     "require": {
         "php": "~8.2.0 || ~8.3.0 || ~8.4.0 || ~8.5.0",
         "mage-os/module-ai-base": "^1.0 || dev-main",
-        "mago-assistant/mago": "^2.0 || dev-main",
         "magento/framework": ">=103.0",
         "symfony/http-client": "^6.4 || ^7.0 || ^8.0"
     },

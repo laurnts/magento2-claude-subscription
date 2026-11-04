@@ -11,9 +11,9 @@ use MageOS\AiBase\Model\Client\RecordingAiClientFactory;
 use MageOS\AiBase\Model\Usage\UsageConfig;
 
 /**
- * Applies MageOS usage recording when the admin has enabled it.
+ * Applies AiBase usage recording when the admin has enabled it, as ClientFactory does for bridges.
  */
-class UsageDecorator implements UsageWrapInterface
+class UsageDecorator
 {
     /**
      * @param UsageConfig $usageConfig
@@ -26,13 +26,17 @@ class UsageDecorator implements UsageWrapInterface
     }
 
     /**
-     * @inheritdoc
+     * The client itself, or the recording decorator around it.
+     *
+     * @param AiClientInterface $client
+     * @return AiClientInterface
      */
     public function wrap(AiClientInterface $client): AiClientInterface
     {
         if (!$this->usageConfig->isEnabled()) {
             return $client;
         }
+
         return $this->recordingFactory->create(['delegate' => $client]);
     }
 }

@@ -9,6 +9,8 @@ if (!is_file($autoload)) {
     throw new RuntimeException('Run composer install from the Magento root before PHPUnit.');
 }
 $loader = require $autoload;
-// Prepend the worktree module root so tests run against this copy, not the
-// main-checkout copy that the PSR-0 fallback would otherwise find first.
+// Prepend this checkout so the tests run against it, not a copy the PSR-0 fallback finds first.
 $loader->addPsr4('MagoAssistant\\ClaudeSubscription\\', [dirname(__DIR__)]);
+// Generated factories exist only after Magento has generated them.
+require_once __DIR__ . '/Unit/Fakes/FieldDescriptorInterfaceFactoryStub.php';
+require_once __DIR__ . '/Unit/Fakes/ClaudeSubscriptionClientFactoryStub.php';

@@ -7,10 +7,8 @@ declare(strict_types=1);
 namespace MagoAssistant\ClaudeSubscription\Plugin;
 
 use MagoAssistant\ClaudeSubscription\AiService\ClaudeSubscription;
-use MagoAssistant\ClaudeSubscription\Service\Client\ClaudeSubscriptionClient;
-use MagoAssistant\ClaudeSubscription\Service\Client\UsageWrapInterface;
-use MagoAssistant\ClaudeSubscription\Service\Proxy\ProxyClientInterface;
-use MagoAssistant\ClaudeSubscription\Service\Translation\RequestTranslator;
+use MagoAssistant\ClaudeSubscription\Service\Client\ClaudeSubscriptionClientFactory;
+use MagoAssistant\ClaudeSubscription\Service\Client\UsageDecorator;
 use MageOS\AiBase\Api\AiClientInterface;
 use MageOS\AiBase\Api\AiServiceSelectorInterface;
 use MageOS\AiBase\Api\Data\AiServiceInterface;
@@ -19,28 +17,35 @@ use MageOS\AiBase\Model\Client\ClientFactory;
 use Magento\Framework\Exception\LocalizedException;
 
 /**
- * Returns the Claude Subscription client for that service row and leaves every other provider alone.
+ * Serves a Claude Subscription row itself and leaves every other provider to AiBase.
+ *
+ * AiBase builds clients from Symfony AI platform bridges. This provider has none, so the two
+ * entry points are intercepted: when the resolved row is ours the client is built here, and
+ * otherwise the call proceeds untouched.
  */
 class ClientFactoryPlugin
 {
     /**
      * @param AiServiceSelectorInterface $selector
      * @param BridgeRegistry $bridges
-     * @param RequestTranslator $requests
-     * @param ProxyClientInterface $proxy
-     * @param UsageWrapInterface $usage
+     * @param ClaudeSubscription $service
+     * @param ClaudeSubscriptionClientFactory $clients
+     * @param UsageDecorator $usage
      */
     public function __construct(
         private readonly AiServiceSelectorInterface $selector,
         private readonly BridgeRegistry $bridges,
-        private readonly RequestTranslator $requests,
-        private readonly ProxyClientInterface $proxy,
-        private readonly UsageWrapInterface $usage,
+        private readonly ClaudeSubscription $service,
+        private readonly ClaudeSubscriptionClientFactory $clients,
+        private readonly UsageDecorator $usage,
     ) {
     }
 
     /**
      * Named code, or the first usable row when the caller asked for automatic selection.
+     *
+     * The automatic case mirrors ClientFactory::resolveDefaultService(): the first row whose
+     * bridge is available wins, and the registered marker makes this provider available.
      *
      * @param ClientFactory $subject
      * @param callable $proceed
@@ -55,28 +60,15 @@ class ClientFactoryPlugin
         ?string $serviceCode = null,
         ?string $consumer = null
     ): AiClientInterface {
-        if ($serviceCode !== null) {
-            $row = $this->selector->getByCode($serviceCode)[0] ?? null;
-            if ($row !== null && $row->getCode() === ClaudeSubscription::CODE) {
-                return $this->clientFor($row, $consumer);
-            }
-            return $proceed($serviceCode, $consumer);
-        }
-        foreach ($this->selector->getAll() as $row) {
-            $ours = $row->getCode() === ClaudeSubscription::CODE;
-            if (!$ours && !$this->bridges->isAvailable($row->getCode())) {
-                continue;
-            }
-            if ($ours) {
-                return $this->clientFor($row, $consumer);
-            }
-            return $proceed(null, $consumer);
-        }
-        return $proceed(null, $consumer);
+        $row = $serviceCode === null
+            ? $this->firstAvailable()
+            : ($this->selector->getByCode($serviceCode)[0] ?? null);
+
+        return $this->isOurs($row) ? $this->clientFor($row, $consumer) : $proceed($serviceCode, $consumer);
     }
 
     /**
-     * One configured row, by the id Mago stored.
+     * One configured row, by the id the consumer stored.
      *
      * @param ClientFactory $subject
      * @param callable $proceed
@@ -92,10 +84,36 @@ class ClientFactoryPlugin
         ?string $consumer = null
     ): AiClientInterface {
         $row = $this->selector->getById($serviceId);
-        if ($row !== null && $row->getCode() === ClaudeSubscription::CODE) {
-            return $this->clientFor($row, $consumer);
+
+        return $this->isOurs($row) ? $this->clientFor($row, $consumer) : $proceed($serviceId, $consumer);
+    }
+
+    /**
+     * The row AiBase itself would pick when no code is given.
+     *
+     * @return AiServiceInterface|null
+     */
+    private function firstAvailable(): ?AiServiceInterface
+    {
+        foreach ($this->selector->getAll() as $row) {
+            if ($this->bridges->isAvailable($row->getCode())) {
+                return $row;
+            }
         }
-        return $proceed($serviceId, $consumer);
+
+        return null;
+    }
+
+    /**
+     * Whether this row is a Claude Subscription row.
+     *
+     * @param AiServiceInterface|null $row
+     * @return bool
+     * @phpstan-assert-if-true AiServiceInterface $row
+     */
+    private function isOurs(?AiServiceInterface $row): bool
+    {
+        return $row !== null && $row->getCode() === ClaudeSubscription::CODE;
     }
 
     /**
@@ -109,22 +127,19 @@ class ClientFactoryPlugin
     private function clientFor(AiServiceInterface $row, ?string $consumer): AiClientInterface
     {
         $configuration = $row->getConfiguration();
-        $baseUrl = $configuration['base_url'] ?? '';
-        if (!is_string($baseUrl) || $baseUrl === '') {
-            $baseUrl = ClaudeSubscription::DEFAULT_BASE_URL;
-        }
         $model = $configuration['model'] ?? '';
         if (!is_string($model) || $model === '') {
-            throw new LocalizedException(__('Pick a model on the Claude Subscription row before using it.'));
+            throw new LocalizedException(
+                __('Pick a model on the %1 row before using it.', $this->service->getName())
+            );
         }
-        $client = new ClaudeSubscriptionClient(
-            $this->proxy,
-            $this->requests,
-            $baseUrl,
-            $model,
-            $row->getId(),
-            is_string($consumer) ? $consumer : ''
-        );
+        $client = $this->clients->create([
+            'baseUrl' => $this->service->baseUrl($configuration),
+            'model' => $model,
+            'serviceId' => $row->getId(),
+            'consumer' => $consumer ?? '',
+        ]);
+
         return $this->usage->wrap($client);
     }
 }

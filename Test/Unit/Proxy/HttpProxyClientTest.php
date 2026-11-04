@@ -29,7 +29,7 @@ final class HttpProxyClientTest extends TestCase
                 '{"choices":[{"message":{"content":"hello"}}],"usage":{"prompt_tokens":2,"completion_tokens":3}}'
             );
         });
-        $client = new HttpProxyClient($http, new NullLogger());
+        $client = new HttpProxyClient(new NullLogger(), $http);
 
         $result = $client->complete(
             'http://host.docker.internal:3456/v1/',
@@ -58,7 +58,7 @@ final class HttpProxyClientTest extends TestCase
             return new MockResponse('{"choices":[{"message":{"content":""}}]}');
         });
 
-        $result = (new HttpProxyClient($http, new NullLogger()))->complete('http://proxy.test/v1', 'm', [], 128);
+        $result = (new HttpProxyClient(new NullLogger(), $http))->complete('http://proxy.test/v1', 'm', [], 128);
 
         self::assertArrayNotHasKey('authorization', $seen['normalized_headers'] ?? []);
         $body = json_decode((string) $seen['body'], true, 512, JSON_THROW_ON_ERROR);
@@ -78,7 +78,7 @@ final class HttpProxyClientTest extends TestCase
         $http = new MockHttpClient(
             new MockResponse($body, ['response_headers' => ['content-type' => 'text/event-stream']])
         );
-        $client = new HttpProxyClient($http, new NullLogger());
+        $client = new HttpProxyClient(new NullLogger(), $http);
 
         $stream = $client->stream('http://proxy.test/v1', 'm', [], null);
         $chunks = [];
@@ -96,7 +96,7 @@ final class HttpProxyClientTest extends TestCase
         $http = new MockHttpClient(static function (): never {
             throw new TransportException('connection refused');
         });
-        $client = new HttpProxyClient($http, new NullLogger());
+        $client = new HttpProxyClient(new NullLogger(), $http);
 
         try {
             $client->complete('http://proxy.test/v1', 'm', [], null);
@@ -118,7 +118,7 @@ final class HttpProxyClientTest extends TestCase
         $http->method('request')->willReturn($mockResponse);
         $http->method('stream')->willThrowException(new TransportException('connection dropped mid-stream'));
 
-        $client = new HttpProxyClient($http, new NullLogger());
+        $client = new HttpProxyClient(new NullLogger(), $http);
 
         try {
             $gen = $client->stream('http://proxy.test/v1', 'm', [], null);
@@ -139,6 +139,6 @@ final class HttpProxyClientTest extends TestCase
         $http = new MockHttpClient(new MockResponse('{"error":{"message":"no"}}', ['http_code' => 401]));
         $this->expectExceptionMessage('no');
 
-        (new HttpProxyClient($http, new NullLogger()))->complete('http://proxy.test/v1', 'm', [], null);
+        (new HttpProxyClient(new NullLogger(), $http))->complete('http://proxy.test/v1', 'm', [], null);
     }
 }

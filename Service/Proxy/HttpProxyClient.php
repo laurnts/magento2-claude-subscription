@@ -7,31 +7,38 @@ declare(strict_types=1);
 namespace MagoAssistant\ClaudeSubscription\Service\Proxy;
 
 use Magento\Framework\Exception\LocalizedException;
+use Magento\Framework\Phrase;
 use Psr\Log\LoggerInterface;
+use Symfony\Component\HttpClient\HttpClient;
 use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Symfony\Contracts\HttpClient\ResponseInterface;
 
 /**
- * Posts OpenAI chat completions to the host proxy.
+ * Posts OpenAI-style chat completions to the host and reads back the reply, buffered or streamed.
  */
 class HttpProxyClient implements ProxyClientInterface
 {
     /**
-     * Admin text when the host process is not accepting connections.
+     * Seconds a single completion may take. Long replies through `claude --print` are slow.
      */
-    private const UNREACHABLE = 'Claude Subscription proxy is not reachable at %1. '
-        . 'On the Docker host, run claude auth login once and then '
-        . 'app/code/MagoAssistant/ClaudeSubscription/bin/claude-subscription start.';
+    private const TIMEOUT = 600;
 
     /**
-     * @param HttpClientInterface $http
+     * @var HttpClientInterface
+     */
+    private readonly HttpClientInterface $http;
+
+    /**
      * @param LoggerInterface $logger
+     * @param HttpClientInterface|null $http Symfony's default client when none is given, as
+     *        AiBase's own ClientFactory does. A test passes a MockHttpClient here.
      */
     public function __construct(
-        private readonly HttpClientInterface $http,
         private readonly LoggerInterface $logger,
+        ?HttpClientInterface $http = null,
     ) {
+        $this->http = $http ?? HttpClient::create();
     }
 
     /**
@@ -47,20 +54,11 @@ class HttpProxyClient implements ProxyClientInterface
         $response = $this->open($url, $model, $messages, $maxTokens, false);
         try {
             $payload = $response->toArray(false);
-        } catch (\Throwable $exception) {
-            $this->fail(
-                $url,
-                200,
-                'Claude Subscription proxy returned a response that is not a chat completion.',
-                $exception
-            );
+        } catch (\Exception $exception) {
+            $this->fail($url, 200, $this->notACompletion(), $exception);
         }
-        if (!is_array($payload) || !isset($payload['choices']) || !is_array($payload['choices'])) {
-            $this->fail(
-                $url,
-                200,
-                'Claude Subscription proxy returned a response that is not a chat completion.'
-            );
+        if (!isset($payload['choices']) || !is_array($payload['choices'])) {
+            $this->fail($url, 200, $this->notACompletion());
         }
         $content = $payload['choices'][0]['message']['content'] ?? '';
         return [
@@ -108,13 +106,7 @@ class HttpProxyClient implements ProxyClientInterface
                 }
             }
         } catch (TransportExceptionInterface $exception) {
-            $this->fail(
-                $url,
-                0,
-                self::UNREACHABLE,
-                $exception,
-                [$url]
-            );
+            $this->fail($url, 0, $this->unreachable($url), $exception);
         }
         return $usage;
     }
@@ -153,8 +145,8 @@ class HttpProxyClient implements ProxyClientInterface
             $json['max_tokens'] = $maxTokens;
         }
         $options = [
-            'timeout' => 600,
-            'max_duration' => 600,
+            'timeout' => self::TIMEOUT,
+            'max_duration' => self::TIMEOUT,
             'headers' => ['Accept' => $stream ? 'text/event-stream' : 'application/json'],
             'json' => $json,
         ];
@@ -162,13 +154,7 @@ class HttpProxyClient implements ProxyClientInterface
             $response = $this->http->request('POST', $url, $options);
             $status = $response->getStatusCode();
         } catch (TransportExceptionInterface $exception) {
-            $this->fail(
-                $url,
-                0,
-                self::UNREACHABLE,
-                $exception,
-                [$url]
-            );
+            $this->fail($url, 0, $this->unreachable($url), $exception);
         }
         if ($status < 200 || $status >= 300) {
             $this->reject($response, $status, $url);
@@ -197,9 +183,9 @@ class HttpProxyClient implements ProxyClientInterface
             $message = null;
         }
         if ($message !== null) {
-            $this->fail($url, $status, $message);
+            $this->fail($url, $status, __('Claude Subscription host reported: %1', $message));
         }
-        $this->fail($url, $status, 'Claude Subscription proxy returned HTTP %1.', null, [$status]);
+        $this->fail($url, $status, __('Claude Subscription host returned HTTP %1.', $status));
     }
 
     /**
@@ -234,19 +220,10 @@ class HttpProxyClient implements ProxyClientInterface
             try {
                 $json = json_decode($data, true, 512, JSON_THROW_ON_ERROR);
             } catch (\JsonException $exception) {
-                $this->fail(
-                    $url,
-                    200,
-                    'Claude Subscription proxy returned a response that is not a chat completion.',
-                    $exception
-                );
+                $this->fail($url, 200, $this->notACompletion(), $exception);
             }
             if (!is_array($json)) {
-                $this->fail(
-                    $url,
-                    200,
-                    'Claude Subscription proxy returned a response that is not a chat completion.'
-                );
+                $this->fail($url, 200, $this->notACompletion());
             }
             $piece = $json['choices'][0]['delta']['content'] ?? null;
             if (is_string($piece) && $piece !== '') {
@@ -287,25 +264,43 @@ class HttpProxyClient implements ProxyClientInterface
     }
 
     /**
-     * Log the URL and status, then throw. The key and the prompt are not logged.
+     * Admin text when the host process is not accepting connections.
      *
-     * @param string          $url
-     * @param int             $status
-     * @param string          $message
-     * @param \Throwable|null $previous
-     * @param array           $arguments Phrase arguments
+     * @param string $url
+     * @return Phrase
+     */
+    private function unreachable(string $url): Phrase
+    {
+        return __(
+            'Claude Subscription host is not reachable at %1. On the Docker host, run claude auth login once '
+            . 'and then app/code/MagoAssistant/ClaudeSubscription/bin/claude-subscription start.',
+            $url
+        );
+    }
+
+    /**
+     * Admin text when the body is not an OpenAI-style completion.
+     *
+     * @return Phrase
+     */
+    private function notACompletion(): Phrase
+    {
+        return __('Claude Subscription host returned a response that is not a chat completion.');
+    }
+
+    /**
+     * Log the URL and status, then throw. The prompt is never logged.
+     *
+     * @param string $url
+     * @param int $status
+     * @param Phrase $message
+     * @param \Exception|null $previous
      * @return never
      * @throws LocalizedException
      */
-    private function fail(
-        string $url,
-        int $status,
-        string $message,
-        ?\Throwable $previous = null,
-        array $arguments = []
-    ): never {
-        $phrase = $arguments === [] ? __($message) : __($message, ...$arguments);
-        $exception = new LocalizedException($phrase, $previous);
+    private function fail(string $url, int $status, Phrase $message, ?\Exception $previous = null): never
+    {
+        $exception = new LocalizedException($message, $previous);
         $this->logger->error($exception->getMessage(), ['url' => $url, 'status' => $status]);
         throw $exception;
     }

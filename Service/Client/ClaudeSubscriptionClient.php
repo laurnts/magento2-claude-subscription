@@ -25,7 +25,7 @@ use MageOS\AiBase\Model\Chat\TokenUsage;
 use MageOS\AiBase\Model\Chat\ToolCall;
 
 /**
- * MageOS client that speaks the host proxy's text chat.
+ * AiBase client that speaks the host's text chat. One instance per configured row and call.
  */
 class ClaudeSubscriptionClient implements AiClientInterface
 {
@@ -43,7 +43,7 @@ class ClaudeSubscriptionClient implements AiClientInterface
         private readonly string $baseUrl,
         private readonly string $model,
         private readonly string $serviceId,
-        private readonly string $consumer,
+        private readonly string $consumer = '',
     ) {
     }
 
@@ -83,12 +83,12 @@ class ClaudeSubscriptionClient implements AiClientInterface
         $calls = [];
         foreach ($stream as $delta) {
             foreach ($parser->push($delta) as $event) {
-                [$text, $calls] = $this->yieldEvent($event, $text, $calls);
+                [$text, $calls] = $this->collect($event, $text, $calls);
                 yield $this->chunk($event);
             }
         }
         foreach ($parser->finish() as $event) {
-            [$text, $calls] = $this->yieldEvent($event, $text, $calls);
+            [$text, $calls] = $this->collect($event, $text, $calls);
             yield $this->chunk($event);
         }
         $usage = $stream->getReturn();
@@ -182,7 +182,7 @@ class ClaudeSubscriptionClient implements AiClientInterface
      * @param array  $calls
      * @return array Text so far and the calls so far
      */
-    private function yieldEvent(array $event, string $text, array $calls): array
+    private function collect(array $event, string $text, array $calls): array
     {
         if ($event['type'] === 'text') {
             $text .= $event['text'];

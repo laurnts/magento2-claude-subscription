@@ -7,99 +7,81 @@ declare(strict_types=1);
 namespace MagoAssistant\ClaudeSubscription\Test\Unit\AiService;
 
 use MagoAssistant\ClaudeSubscription\AiService\ClaudeSubscription;
+use MagoAssistant\ClaudeSubscription\Test\Unit\Fakes\FieldFactory;
+use MageOS\AiBase\Api\JsonFetcherInterface;
 use Magento\Framework\Exception\LocalizedException;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
-use Symfony\Component\HttpClient\Exception\TransportException;
-use Symfony\Component\HttpClient\MockHttpClient;
-use Symfony\Component\HttpClient\Response\MockResponse;
 
 final class ClaudeSubscriptionTest extends TestCase
 {
     #[Test]
-    public function itAdvertisesClaudeSubscriptionAndTheCuratedModels(): void
+    public function itAdvertisesTheCodeTheCuratedModelsAndNoApiKey(): void
     {
-        $service = new ClaudeSubscription(new MockHttpClient());
+        $service = new ClaudeSubscription(new FieldFactory(), $this->createStub(JsonFetcherInterface::class));
 
         self::assertSame('claude_subscription', $service->getCode());
         self::assertSame('Claude Subscription', $service->getName());
-        self::assertSame('Sonnet', $service->getSupportedModels()['sonnet']);
-        self::assertArrayHasKey('opus', $service->getSupportedModels());
-        self::assertArrayHasKey('fable', $service->getSupportedModels());
-        self::assertArrayHasKey('haiku', $service->getSupportedModels());
+        self::assertSame(['opus', 'fable', 'sonnet', 'haiku'], array_keys($service->getSupportedModels()));
+        self::assertSame([], $service->getPlatformArguments(['base_url' => 'http://x']));
 
         $fields = [];
         foreach ($service->getConfigurationFields() as $field) {
             $fields[$field->getName()] = $field;
         }
+        self::assertSame(['base_url', 'model'], array_keys($fields));
         self::assertSame(ClaudeSubscription::DEFAULT_BASE_URL, $fields['base_url']->getDefault());
-        self::assertSame('sonnet', $fields['model']->getDefault());
+        self::assertTrue($fields['base_url']->isEndpoint());
         self::assertSame('select', $fields['model']->getType());
-        self::assertArrayNotHasKey('api_key', $fields);
+        self::assertSame('sonnet', $fields['model']->getDefault());
+        self::assertCount(4, $fields['model']->getOptions());
     }
 
     #[Test]
-    public function fetchModelsReadsTheOpenAiList(): void
+    public function fetchModelsAsksTheHostForItsModelList(): void
     {
-        $seen = [];
-        $http = new MockHttpClient(function (string $method, string $url, array $options) use (&$seen): MockResponse {
-            $seen = ['method' => $method, 'url' => $url, 'options' => $options];
-            return new MockResponse('{"data":[{"id":"claude-sonnet-4"},{"id":"custom"}]}');
-        });
-        $service = new ClaudeSubscription($http);
+        $fetcher = $this->createMock(JsonFetcherInterface::class);
+        $fetcher->expects(self::once())
+            ->method('getJson')
+            ->with('http://host.docker.internal:3456/v1/models', [])
+            ->willReturn(['data' => [['id' => 'opus'], ['id' => 'custom'], ['nope' => 1]]]);
+        $service = new ClaudeSubscription(new FieldFactory(), $fetcher);
 
-        $models = $service->fetchModels([
-            'base_url' => 'http://host.docker.internal:3456/v1/',
-        ]);
+        $models = $service->fetchModels(['base_url' => 'http://host.docker.internal:3456/v1/']);
 
-        self::assertSame(['claude-sonnet-4' => 'claude-sonnet-4', 'custom' => 'custom'], $models);
-        self::assertSame('GET', $seen['method']);
-        self::assertSame('http://host.docker.internal:3456/v1/models', $seen['url']);
-        self::assertArrayNotHasKey('authorization', $seen['options']['normalized_headers'] ?? []);
-        self::assertSame(20, (int) $seen['options']['timeout']);
+        self::assertSame(['opus' => 'opus', 'custom' => 'custom'], $models);
     }
 
     #[Test]
-    public function fetchModelsNamesTheUrlWhenTheBodyIsNotAList(): void
+    public function baseUrlIsTrimmedAndDefaulted(): void
     {
-        $http = new MockHttpClient(new MockResponse('{"nope":true}'));
+        $service = new ClaudeSubscription(new FieldFactory(), $this->createStub(JsonFetcherInterface::class));
 
-        try {
-            (new ClaudeSubscription($http))->fetchModels([]);
-            $this->fail('Expected LocalizedException');
-        } catch (LocalizedException $e) {
-            $this->assertStringContainsString('not a model list', $e->getMessage());
-            $this->assertStringContainsString('http://host.docker.internal:3456/v1/models', $e->getMessage());
-        }
+        self::assertSame('http://p/v1', $service->baseUrl(['base_url' => ' http://p/v1/ ']));
+        self::assertSame(ClaudeSubscription::DEFAULT_BASE_URL, $service->baseUrl([]));
+        self::assertSame(ClaudeSubscription::DEFAULT_BASE_URL, $service->baseUrl(['base_url' => 42]));
     }
 
     #[Test]
-    public function fetchModelsNamesTheUrlWhenTheHostIsDown(): void
+    public function fetchModelsFallsBackToTheDockerHostDefault(): void
     {
-        $http = new MockHttpClient(static function (): never {
-            throw new TransportException('connection refused');
-        });
+        $fetcher = $this->createMock(JsonFetcherInterface::class);
+        $fetcher->expects(self::once())
+            ->method('getJson')
+            ->with(ClaudeSubscription::DEFAULT_BASE_URL . '/models')
+            ->willReturn(['data' => []]);
 
-        try {
-            (new ClaudeSubscription($http))->fetchModels(['base_url' => 'http://proxy.test/v1']);
-            $this->fail('Expected LocalizedException');
-        } catch (LocalizedException $e) {
-            $this->assertStringContainsString('not reachable', $e->getMessage());
-            $this->assertStringContainsString('http://proxy.test/v1/models', $e->getMessage());
-        }
+        self::assertSame([], (new ClaudeSubscription(new FieldFactory(), $fetcher))->fetchModels([]));
     }
 
     #[Test]
-    public function fetchModelsThrowsHttpStatusOnNon2xxBeforeParsingBody(): void
+    public function fetchModelsRejectsABodyWithoutAList(): void
     {
-        $http = new MockHttpClient(new MockResponse('<html>', ['http_code' => 502]));
+        $fetcher = $this->createStub(JsonFetcherInterface::class);
+        $fetcher->method('getJson')->willReturn(['nope' => true]);
+        $this->expectException(LocalizedException::class);
+        $this->expectExceptionMessage('missing "data" list');
 
-        try {
-            (new ClaudeSubscription($http))->fetchModels([]);
-            $this->fail('Expected LocalizedException');
-        } catch (LocalizedException $e) {
-            $this->assertStringContainsString('HTTP 502', $e->getMessage());
-            $this->assertStringContainsString(ClaudeSubscription::DEFAULT_BASE_URL . '/models', $e->getMessage());
-        }
+        (new ClaudeSubscription(new FieldFactory(), $fetcher))->fetchModels([]);
     }
 }
