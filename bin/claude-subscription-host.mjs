@@ -2,9 +2,9 @@
 /**
  * Copyright © Mago Assistant
  *
- * Speaks the /v1 chat interface on the Mac, and runs the host `claude` login.
+ * Speaks the /v1 chat interface and runs `claude --print` with the login of the machine it is on.
  * Magento, inside the container, calls http://host.docker.internal:3456/v1.
- * Start: app/code/MagoAssistant/ClaudeSubscription/bin/claude-subscription start
+ * Start: bin/claude-subscription start (from the module directory)
  */
 import { spawn } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -232,7 +232,7 @@ function runClaude(dir, promptFile, model, text, onDelta) {
             finished = true;
             if (spawnError.code === 'ENOENT') {
                 reject(Object.assign(new Error(
-                    'claude was not found on PATH. On the Mac, run claude auth login, then start this host again.'
+                    'claude was not found on PATH. Install it, run claude auth login, then start this host again.'
                 ), { status: 502 }));
                 return;
             }

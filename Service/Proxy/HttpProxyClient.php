@@ -272,8 +272,8 @@ class HttpProxyClient implements ProxyClientInterface
     private function unreachable(string $url): Phrase
     {
         return __(
-            'Claude Subscription host is not reachable at %1. On the Docker host, run claude auth login once '
-            . 'and then app/code/MagoAssistant/ClaudeSubscription/bin/claude-subscription start.',
+            'Claude Subscription host is not reachable at %1. On the machine with the claude login '
+            . '(claude auth login), run bin/claude-subscription start from the module directory.',
             $url
         );
     }

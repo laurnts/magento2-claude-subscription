@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Start or stop the Claude subscription host.
-# Run it on the machine where `claude auth login` was done. The php container
-# cannot see that login.
+# Run it on the machine where `claude auth login` was done. A container
+# cannot see a login made outside it.
 set -euo pipefail
 
 dir=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
