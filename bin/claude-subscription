@@ -1,19 +1,31 @@
 #!/usr/bin/env bash
 # Start or stop the Claude subscription host.
 # Run it on the machine where `claude auth login` was done. A container
-# cannot see a login made outside it.
+# cannot see a login made outside it. The file may be symlinked into the
+# Magento root's bin/ so it sits next to bin/magento.
 set -euo pipefail
 
-dir=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+# Resolve symlinks so the host script is found next to this file's real location.
+self=$0
+while [[ -L "$self" ]]; do
+    target=$(readlink "$self")
+    case "$target" in
+        /*) self=$target ;;
+        *) self=$(dirname "$self")/$target ;;
+    esac
+done
+dir=$(CDPATH= cd -- "$(dirname "$self")" && pwd)
+
 root=$dir
 while [[ "$root" != "/" && ! -f "$root/bin/magento" ]]; do
     root=$(dirname "$root")
 done
 if [[ ! -f "$root/bin/magento" ]]; then
-    echo "Could not find the Magento root from $dir." >&2
+    echo "Could not find the Magento root above $dir." >&2
     exit 1
 fi
 
+host_script="$dir/claude-subscription-host.mjs"
 pidfile="$root/var/claude-subscription.pid"
 logfile="$root/var/log/claude-subscription.log"
 action=foreground
@@ -21,13 +33,13 @@ host=127.0.0.1
 port=3456
 
 usage() {
-    echo "Usage: claude-subscription [start|stop] [--host 127.0.0.1] [--port 3456]" >&2
+    echo "Usage: claude-subscription [start|stop|status] [--host 127.0.0.1] [--port 3456]" >&2
     exit 1
 }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        start|stop)
+        start|stop|status)
             action=$1
             shift
             ;;
@@ -64,7 +76,43 @@ running_pid() {
     return 1
 }
 
+# node and claude must both be callable from this shell, or the host cannot answer a chat.
+preflight() {
+    local missing=0
+    if ! command -v node >/dev/null 2>&1; then
+        echo "node was not found on PATH." >&2
+        missing=1
+    fi
+    if ! command -v "${CLAUDE_BIN:-claude}" >/dev/null 2>&1; then
+        echo "claude was not found on PATH. Install it, run claude auth login, then start again." >&2
+        echo "Set CLAUDE_BIN when it is installed somewhere else." >&2
+        missing=1
+    fi
+    if [[ ! -f "$host_script" ]]; then
+        echo "Host script was not found at $host_script." >&2
+        missing=1
+    fi
+    return $missing
+}
+
+# True once the listener answers on the chosen address.
+answers() {
+    local probe="127.0.0.1"
+    if [[ "$host" != "0.0.0.0" ]]; then
+        probe=$host
+    fi
+    curl -s -m 2 -o /dev/null "http://$probe:$port/v1/models" 2>/dev/null
+}
+
 case "$action" in
+    status)
+        if pid=$(running_pid); then
+            echo "Running ($pid) on http://$host:$port/v1"
+        else
+            echo "Not running."
+            exit 1
+        fi
+        ;;
     stop)
         if pid=$(running_pid); then
             kill "$pid" 2>/dev/null || true
@@ -89,17 +137,39 @@ case "$action" in
             echo "Already running ($pid)."
             exit 0
         fi
+        preflight
+        if answers; then
+            echo "Something already answers on http://$host:$port/v1 but is not the host this script started." >&2
+            echo "Stop it, or pass --port to use another port." >&2
+            exit 1
+        fi
         mkdir -p "$root/var/log"
         export HOST="$host"
         export PORT="$port"
-        nohup node "$dir/claude-subscription-host.mjs" >>"$logfile" 2>&1 &
-        echo "$!" >"$pidfile"
-        echo "Started $!."
-        echo "Log: $logfile"
+        nohup node "$host_script" >>"$logfile" 2>&1 &
+        pid=$!
+        echo "$pid" >"$pidfile"
+        for _ in 1 2 3 4 5 6 7 8 9 10; do
+            if answers; then
+                echo "Started $pid on http://$host:$port/v1"
+                echo "Log: $logfile"
+                exit 0
+            fi
+            if ! kill -0 "$pid" 2>/dev/null; then
+                break
+            fi
+            sleep 0.5
+        done
+        rm -f "$pidfile"
+        kill "$pid" 2>/dev/null || true
+        echo "The host did not start. Last log lines from $logfile:" >&2
+        tail -n 5 "$logfile" >&2 || true
+        exit 1
         ;;
     foreground)
+        preflight
         export HOST="$host"
         export PORT="$port"
-        exec node "$dir/claude-subscription-host.mjs"
+        exec node "$host_script"
         ;;
 esac

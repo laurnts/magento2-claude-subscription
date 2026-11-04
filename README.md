@@ -8,15 +8,17 @@ The host speaks text chat only. The module turns tool calls into `<mago_tool_cal
 
 ## Host setup
 
-The host is a Node script. It runs wherever `node` and `claude` are, never in the `php` container, and `bin/magento` has no command for it. From this module's directory:
+The host is a Node script. It runs wherever `node` and `claude` are, never in the `php` container, and `bin/magento` has no command for it. Link it next to `bin/magento` once, then start and stop it from the Magento root:
 
 ```bash
+ln -s ../app/code/MagoAssistant/ClaudeSubscription/bin/claude-subscription bin/claude-subscription
 claude auth login
 bin/claude-subscription start
+bin/claude-subscription status
 bin/claude-subscription stop
 ```
 
-`start` leaves the listener running after the terminal closes. The script finds the Magento root above it and writes the pid to `var/claude-subscription.pid` and the log to `var/log/claude-subscription.log` there. `stop` ends that process. Without `start` or `stop` the script runs the listener in the foreground. `claude` must be on `PATH` in the shell that starts it (`~/.local/bin` is the usual place). Docker Compose does not start it. A reboot stops it. Log in again only when that login is gone.
+The same commands work from the module directory without the link. `start` refuses when `node` or `claude` is not on `PATH`, when something else already answers on the port, or when the listener does not come up, and prints why. It leaves the listener running after the terminal closes, writes the pid to `var/claude-subscription.pid` and the log to `var/log/claude-subscription.log` under the Magento root, and `stop` ends that process. Without an action the script runs the listener in the foreground. `claude` is usually in `~/.local/bin`. Docker Compose does not start the host. A reboot stops it. Log in again only when that login is gone.
 
 `--host` and `--port`, or the `HOST` and `PORT` variables, change the bind address and port. The default is `127.0.0.1` and `3456`. `CLAUDE_BIN` overrides the `claude` executable. A request is stopped after 10 minutes.
 
@@ -42,7 +44,7 @@ bin/magento setup:upgrade
 bin/magento cache:flush
 ```
 
-There is no schema and no data patch. The package is not on Packagist yet; `composer require` needs this repository added as a VCS repository first.
+Then link the host launcher into `bin/` as shown under Host setup. There is no schema and no data patch. The package is not on Packagist yet; `composer require` needs this repository added as a VCS repository first.
 
 ## Admin
 
