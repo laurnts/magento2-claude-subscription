@@ -1,4 +1,4 @@
-# MagoAssistant Claude Subscription
+# Claude Subscription for MageOS AiBase
 
 ## What it is
 
@@ -34,14 +34,19 @@ The script starts `claude` on the same machine it is running on. A Node process 
 
 When Claude is on the Docker host, `http://host.docker.internal:3456/v1/models` must return JSON. On this Docker Desktop setup that hostname reaches a process bound to the Mac's `127.0.0.1`. On Linux the `php` container needs `extra_hosts: ["host.docker.internal:host-gateway"]`. `localhost` inside the `php` container is that container, not the host. The `php` service in this Compose file does not publish port 3456. When Node is in its own container, check `http://<that-service-name>:3456/v1/models` from the `php` container instead.
 
-## Admin
+## Install
+
+Clone or copy the module into `app/code/MagoAssistant/ClaudeSubscription` of a shop that has [MageOS AiBase](https://github.com/mage-os/mageos-ai-base) installed, then from the Magento root:
 
 ```bash
 bin/magento module:enable MagoAssistant_ClaudeSubscription
 bin/magento setup:upgrade
+bin/magento cache:flush
 ```
 
-There is no schema.
+There is no schema and no data patch. The package is not on Packagist yet; `composer require` needs this repository added as a VCS repository first.
+
+## Admin
 
 1. **Stores > Configuration > Mage-OS > AI Configuration.** Add a service and choose **Claude Subscription**. Base URL `http://host.docker.internal:3456/v1` when Claude is on the Docker host, or `http://<that-service-name>:3456/v1` when Node runs in a container on the `revproxy` network. Use the `/v1` root, not `/v1/chat/completions`. Choose a model. Save.
 2. **Stores > Configuration > Mago Assistant > General > API Settings.** Set **AI Service** to that Claude Subscription row. Save.
@@ -66,7 +71,7 @@ Store text leaves the container for the configured URL and then goes to Anthropi
 
 ## Develop
 
-From the Magento root:
+The module has no tests of its own runner: PHPUnit and phpcs come from the Magento install it sits in. From the Magento root:
 
 ```bash
 php vendor/bin/phpunit -c app/code/MagoAssistant/ClaudeSubscription/phpunit.xml.dist
@@ -75,4 +80,4 @@ php vendor/bin/phpunit -c app/code/MagoAssistant/ClaudeSubscription/phpunit.xml.
 
 The unit tests need no Magento install beyond `vendor/`: the two factories Magento would generate are stubbed under `Test/Unit/Fakes` when `generated/code` does not hold them.
 
-Pinned references: Mago `6b0893addf3538d2a60da15a33257cc1df481099`, MageOS AI Base `b3a07623faf86665a915243a731f68c6da582607`. The listener is `bin/claude-subscription`. `claude` on this Mac was 2.1.285 when it was written.
+Written against MageOS AI Base `b3a07623faf86665a915243a731f68c6da582607` and Mago `6b0893addf3538d2a60da15a33257cc1df481099`. The module depends on AI Base only; Mago is the consumer it was built for. The listener is `bin/claude-subscription`. `claude` on this Mac was 2.1.285 when it was written.
